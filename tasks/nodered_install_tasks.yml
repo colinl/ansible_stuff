@@ -1,5 +1,11 @@
 # tasks to install node-red and scripts
 #
+# example use
+#    - name: Install node-red
+#      include: tasks/nodered_install_tasks.yml
+#      vars:
+#        ansible_user: The user that will run node-red
+#        nodered_repo: Repo to clone nodered flows from  (if required, leave undefined if not)
 
 - name: Install node-red
   become: yes
@@ -71,6 +77,6 @@
       register: nodered
 
     - name: Clone node-red repo
-      shell: "git clone {{nodered_repo}} /home/{{ansible_env.USER}}/.node-red"
+      shell: "git clone {{nodered_repo}} /home/{{ansible_user}}/.node-red"
       when: nodered.stat.exists == False
   when: nodered_repo is defined
