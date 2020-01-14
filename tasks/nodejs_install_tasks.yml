@@ -1,0 +1,109 @@
+# tasks to install nodejs
+#
+# example use
+#    - name: Install nodejs
+#      include: tasks/nodejs_install_tasks.yml
+#      vars:
+#        nodejs_minimum_major_version: "10"
+#        ansible_user: username_to_check_to_see_if_nodered_installed
+
+- name: Uninstall apt versions of node and npm from armv6 (pi zero) if installed
+  become: yes
+  apt:
+    name: 
+      - nodejs
+      - npm
+    state: absent
+  when: ansible_facts['architecture'] == 'armv6l'
+
+- name: Get nodejs version
+  command: node --version
+  ignore_errors: yes
+  register: result
+  
+- name: Save nodejs version
+  set_fact:
+    node_version: "{{(result.stdout | regex_search(regexp, '\\1'))[0]}}"
+  vars:
+    regexp: 'v([\d\.]+)'
+  when: result is succeeded
+  
+- name: nodejs not installed
+  set_fact:
+    node_version: 0
+  when: result is failed
+  
+- debug:
+    msg: Existing nodejs version {{node_version}}
+
+- name: Remove global nodes
+  become: yes
+  file:
+    path: /usr/lib/node_modules/
+    state: absent
+  when: node_version is version(nodejs_minimum_major_version, '<')
+  
+- name: Install/upgrade nodejs from nodesource provided not armv6
+  block:
+    - name: Add the nodesource key
+      become: yes
+      apt_key:
+        url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+        state: present
+      
+    - name: Remove current nodesource repository
+      become: yes
+      file:
+        path: /etc/apt/sources.list.d/nodesource.list
+        state: absent
+      
+    - name: Add nodesource repository
+      become: yes
+      apt_repository:
+        repo: "deb https://deb.nodesource.com/node_{{nodejs_minimum_major_version}}.x {{ansible_facts['lsb']['codename']}} main"
+        filename: nodesource
+        state: present
+      
+    - name: Add nodesource deb-src repository
+      become: yes
+      apt_repository:
+        repo: "deb-src https://deb.nodesource.com/node_{{nodejs_minimum_major_version}}.x {{ansible_facts['lsb']['codename']}} main"
+        filename: nodesource
+        state: present
+      
+    - name: Update cache and install nodejs
+      become: yes
+      apt: 
+        name: nodejs
+        update_cache: yes
+        state: latest
+          
+  when: (node_version is version(nodejs_minimum_major_version, '<')) and (ansible_facts['architecture'] != 'armv6l')
+
+- name: Install nodejs and npm direct from nodejs when armv6, always installs latest version
+  become: yes
+  script: "files/nodejs_install_armv6.sh"
+  when: (node_version is version(nodejs_minimum_major_version, '<')) and (ansible_facts['architecture'] == 'armv6l')
+
+- name: npm rebuild .node-red if present and nodejs updated
+  block:
+    - name: Check if .node-red exists
+      stat:
+        path: "/home/{{ansible_user}}/.node-red"
+      register: nodered
+
+    - name: npm rebuild .node-red
+      block:
+        - name: Stop node-red
+          become: yes
+          systemd:
+            name: nodered
+            state: stopped
+          # ignore errors in case .nodered exists but node-red has not been installed
+          ignore_errors: yes
+        - name: npm rebuild .node-red
+          shell: "npm rebuild"
+          args:
+            "chdir: /home/{{ansible_user}}/.node-red"
+      when: nodered.stat.exists == true
+  when: node_version is version(nodejs_minimum_major_version, '<')

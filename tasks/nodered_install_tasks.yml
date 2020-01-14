@@ -1,0 +1,76 @@
+# tasks to install node-red and scripts
+#
+
+- name: Install node-red
+  become: yes
+  npm:
+    name: node-red
+    global: yes
+    unsafe_perm: yes
+      
+- name: Download scripts
+  become: yes
+  get_url:
+    owner: root
+    mode: '755'
+    url: "https://raw.githubusercontent.com/node-red/linux-installers/master/resources/{{ item }}"
+    dest: "/usr/bin/{{ item|basename }}"
+  with_items:
+    - node-red-start
+    - node-red-stop
+    - node-red-restart
+    - node-red-reload
+    - node-red-log
+    
+- name: check if nodered.service exists
+  stat: 
+    path: /lib/systemd/system/nodered.service
+  register: nodered_service
+  
+- name: Download nodered.service
+  become: yes
+  get_url:
+    owner: root
+    mode: '644'
+    force: no
+    url: "https://raw.githubusercontent.com/node-red/linux-installers/master/resources/nodered.service"
+    dest: "/lib/systemd/system/nodered.service"
+  when: nodered_service.stat.exists == False
+  
+- name: Configure user in nodered.service
+  become: yes
+  block:
+    - name: user
+      lineinfile:
+        path: /lib/systemd/system/nodered.service
+        regexp: 'User='
+        line: "User={{ansible_env.USER}}"
+    
+    - name: group
+      lineinfile:
+        path: /lib/systemd/system/nodered.service
+        regexp: 'Group='
+        line: "Group={{ansible_env.USER}}"
+    
+    - name: home
+      lineinfile:
+        path: /lib/systemd/system/nodered.service
+        regexp: 'WorkingDirectory='
+        line: "WorkingDirectory={{ansible_env.HOME}}"
+    
+- name: Reload systemd
+  become: yes
+  systemd:
+    daemon_reload: yes
+
+- name: Clone node-red repo if necessary
+  block:
+    - name: Check if .node-red exists
+      stat:
+        path: "/home/{{ansible_user}}/.node-red"
+      register: nodered
+
+    - name: Clone node-red repo
+      shell: "git clone {{nodered_repo}} /home/{{ansible_env.USER}}/.node-red"
+      when: nodered.stat.exists == False
+  when: nodered_repo is defined
